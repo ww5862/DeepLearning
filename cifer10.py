@@ -6,7 +6,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import pytorch_lightning as pl
 
-from pytorch_lightning.loggers import CSVLogger
+from pytorch_lightning.loggers import WandbLogger
+from torchmetrics.functional import accuracy
 
 class LitAutoEncoder(pl.LightningModule):
     def __init__(self):
@@ -43,8 +44,21 @@ class LitAutoEncoder(pl.LightningModule):
         x, y = val_batch
         y_hat = self(x) 
         loss = F.cross_entropy(y_hat, y)
-        self.log("val_log", loss)
+        self.log("val_loss", loss)
         return loss
+
+    def test_step(self, batch, batch_idx):
+        loss, acc = self._shared_eval_step(batch, batch_idx)
+        metrics = {"test_acc": acc, "test_loss": loss}
+        self.log_dict(metrics)
+        return metrics
+
+    def _shared_eval_step(self, batch, batch_idx):
+        x, y = batch
+        y_hat = self(x)
+        loss = F.cross_entropy(y_hat, y)
+        acc = accuracy(y_hat, y)
+        return loss, acc
         
 
 #data
@@ -58,7 +72,7 @@ trainset = torchvision.datasets.CIFAR10(root = './data', train = True, download 
 
 #학습용 셋은 섞어서 뽑기
 trainloader = torch.utils.data.DataLoader(trainset, batch_size = 4, shuffle = True, num_workers = 2)
-
+val_loader = torch.utils.data.DataLoader(trainset, batch_size = 4, shuffle = False, num_workers = 2)
 #데이터 불러오기
 testset = torchvision.datasets.CIFAR10(root = './data', train = False, download = True, transform = transform)
 
@@ -68,6 +82,7 @@ testloader = torch.utils.data.DataLoader(testset, batch_size = 4, shuffle = Fals
 model = LitAutoEncoder()
 
 #training
-logger = CSVLogger("logs", name="my_exp_name")
-trainer = pl.Trainer(gpus = 1, precision = 16, limit_train_batches = 0.01, max_epochs = 100, logger = logger)
-trainer.fit(model, trainloader, testloader)
+wandb_logger = WandbLogger(project="2018125048_이윤노_pytorch lightning Cifar10")
+trainer = pl.Trainer(gpus = 1, precision = 16, limit_train_batches = 0.1, logger=wandb_logger)
+trainer.fit(model, trainloader, val_loader)
+trainer.test(model, testloader)
